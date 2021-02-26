@@ -1,0 +1,214 @@
+---
+date: "29 01 2021"
+output: pdf_document
+---
+## 1. Cel 
+Celem projektu jest stworzenie modelu, z wykorzystaniem regresji logistycznej, który na podstawie danych przewidzi czy przychód danej osoby jest poniżej 50k czy powyżej 50k rocznie. 
+
+## 2. Realizacja zadań
+
+### 2.0. Wczytanie danych oraz usuniecie pierwszej kolumny zawierajacej liczby porzadkowe 
+```{r}
+data = read.csv(file = "~/adult_sal.csv", header = TRUE,  sep =",", row.names = NULL)
+data = data[,2:16]
+```
+
+2.1 W kolumnie type_employer:
+ zastąpiono wpisy "Federal-gov" i "Local-gov" wpisem "SL-gov"
+ zastąpiono wpisy "Self-emp-inc" i "Self-emp-not-inc" wpisem "self-emp"
+
+```{r}
+data$type_employer[data$type_employer == "Federal-gov" |
+                     data$type_employer == "Local-gov"] = "SL-gov"
+
+data$type_employer[data$type_employer == "Self-emp-inc" |
+                     data$type_employer == "Self-emp-not-inc"] = "self-emp"
+
+```
+
+### 2.2 W kolumnie "marital" zredukowno liczbę wpisów do trzech (Married; Not-Married; Never-Married)
+```{r}
+unique(data$marital)
+```
+
+```{r}
+data$marital[data$marital == "Married-civ-spouse" |
+               data$marital == "Separated" |
+               data$marital == "Married-spouse-absent" | 
+               data$marital == "Married-AF-spouse" ] = "Married"
+
+data$marital[data$marital == "Divorced" | 
+               data$marital == "Widowed"] = "Not-Married"
+
+unique(data$marital)
+
+```
+### 2.3 Zmniejszono liczbę wpisów w kolumnie country poprzez grupowanie przez kontynenty
+```{r}
+unique(data$country)
+```
+
+```{r}
+SouthAmerica = c("Columbia", "Cuba", "Jamaica","Mexico",
+                 "Honduras", "Peru", "Trinadad&Tobago" )
+NorthAmerica = c("United-States", "Canada","Haiti", 
+                 "Dominican-Republic", "El-Salvador",
+                 "Guatemala", "Outlying-US(Guam-USVI-etc)",
+                 "Nicaragua"  )
+Europe = c("Scotland", "Yugoslavia", "England", "Germany",
+           "Italy", "Poland", "Cambodia", "Portugal", 
+           "France","Greece", "Ireland", "Hungary",
+           "Holand-Netherlands")
+Asia = c("Hong", "India", "Puerto-Rico", "Iran", "Philippines",
+         "Thailand","Ecuador", "Laos", "Taiwan", "China" ,
+         "Japan", "Vietnam","Hong" )
+Inne = c("?", "South")
+
+data$country=with(data, ifelse(country %in% SouthAmerica, "SouthAmerica", 
+                            ifelse(country %in% Europe, "Europe", 
+                              ifelse(country %in% Asia, "Asia", 
+                                ifelse(country %in% NorthAmerica, "NorthAmerica", "Inne")))))
+
+colnames(data)[14] = "continent"
+unique(data$continent)
+
+```
+### 2.4 Zastąpiono wpisy "?" na wartości NA
+```{r}
+data[data == "?"] = NA
+```
+### 2.5 Usunieto wiersze zawierające wpisy NA
+```{r}
+dim(data)
+data = na.omit(data)
+dim(data)
+```
+Na tym etapie można także sprawdzic jak podzielone zostay dane, tzn. ile jest osob których roczny przychód wynosi >50K, a ile osób których ten przychód jest <= 50K
+```{r}
+print(paste("Liczba osob z przychodem rocznym powyzej 50K:",
+            sum(data$income == ">50K")))
+print(paste("Liczba osob z przychodem rocznym rownym lub nizszym niz 50K:", 
+            sum(data$income =="<=50K")))
+```
+```{r}
+print(paste("Procentowy udzial osob z przychodem powyzej 50K: ",
+            round(sum(data$income == ">50K")/nrow(data), digits = 2)))
+print(paste("Procentowy udzial osob z przychodem rownym lub nizszym niz 50K: ",
+            round(sum(data$income =="<=50K")/nrow(data), digits = 2)))
+```
+Mozna wiec zauwazyc ze udzial osob z przychoden nizszym lub rownym 50K rocznie jest zdecydowanie wiekszy.
+
+
+### 2.6 Podzielono dane na zestaw testowy i uczacy. Przyjeto ze zestaw uczacy stanowi 80% calosci danych, a testowy 20%. 
+```{r message=FALSE, warning=FALSE}
+set.seed(1)
+trainSet = numeric()
+testSET = numeric()
+
+library(caret)
+test_index <- createDataPartition(data$income, times = 1, p = 0.2, list = FALSE)
+testSet = data[test_index,]
+trainSet = data[-test_index, ]
+
+print(paste("Liczba elementow w zestawie uczacym: ",nrow(trainSet)))
+print(paste("Liczba elementow w zestawie testowym: ",nrow(testSet)))
+```
+### 2.7 Budowa modelu za pomoca funckji glm 
+
+Zauwazono ze kolumny "education" oraz "education_num" zawieraja te same informacje, tzn. kazdemu poziomowi edukacji zostal przyporzadkowany konkretny numer. 
+```{r}
+unique(data[, c("education", "education_num")])
+```
+Oznacza to ze do tworzenia modelu zrezygnowano z koleumny education_num.
+
+Zrezygnowano takze z kolumn "capital_gain", "capital_loss", które zaburzaly model.
+
+Regresja logistyczna zostala uzyta do przewidzenia prawdopodobienstwa, tzn. do dokladnego przewidzenia wyniku binarnego, czy dana osoba ma przychod wiekszy niz 50K rocznie, czy tez nie. 
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+model <- trainSet %>% mutate(y = as.numeric(income == ">50K")) %>%
+  glm(y ~ age + type_employer + fnlwgt + education + marital + occupation + relationship +
+    race + sex + hr_per_week + continent, data = ., family = binomial(logit),
+      control = list(maxit = 100))
+summary(model)
+```
+
+Na podstawie tych danych mozna odczytac takie informacje jak:
+AIC - mierzy dopasowanie, mniejsze wartosci tego parametru mowia o lepszym dopasowaniu do prawdy. Ten parametr jest istotny do porównania kilku modeli, co zostanie wykorzystane w dalszej czesci.
+
+Wyniki te informuja takze ktore dane sa istotnymi statystycznie predyktatorami - Pr(>|z|) oznaczone nastepujacymi significant codes: *** ** *
+
+### 2.8 Dopasowanie modelu za pomoca funkcji step 
+
+```{r}
+newModel = step(model, direction = "backward", test = "LRT")
+
+```
+
+Mozna zauwazyc ze na tym etapie wartosc parametru AIC jest mniejsza, co oznacza ze model jest lepiej dopasowany.
+
+Usunieto takze z zestawu testowego zmienne, których nie użyto do budowania modelu
+```{r}
+drop = c("education_num", "capital_gain", "capital_loss")
+testSet = testSet[, !names(testSet) %in% drop]
+```
+
+### 2.9  Przetestowano model na danych testowych
+```{r}
+p_hat_glm <- predict(newModel, newdata = testSet, type="response")
+```
+
+W nastepnym kroku stworzono tablice pomylek, ktora w lepszy sposob przedstawi efekt utworzonego modelu. Pokazuje on m.in. ile razy wartosc TRUE sa klasyfikowane jako FALSE. 
+
+```{r}
+confusionMatrix <- table(testSet$income, p_hat_glm > 0.5)
+confusionMatrix
+```
+
+W macierzy powyzej, wiersze oznaczaja rzeczywista wartosc, natomiast kolumny wyznaczona wartosc. 
+
+Na podstawie pierwszego wiersza zauwazono, ze osob zaklasyfikowanych jako majacych dochod <= 50K, ktorych dochod w rzeczywistosci wlasnie tyle wynosil bylo 4251 (TRUE NEGATIVE). Liczba osob ktore zostaly zaklasyfikowane z dochodem <=50K, a w rzeczywistosci dochod ich przekraczal 50K wynosila 363 (FALSE POSITIVE) 
+
+Na podstawie drugiego wiersza mozna zauwazyc, ze osób ktore wlasciwie klasyfikowano jako majace dochod > 50K jest 864 (TRUE POSITIVE). Natomiast liczba osob ktorych dochod wyznaczono na  powyzej 50K, a w rzeczywistosci wynosil mniej niz 50K wynosi 666.
+
+Na podstawie tych wynikow mozna takze wyznaczyc dokladnosc modelu, korzystajac z nastepujacego wzoru:
+
+$accurancy = {\frac{TP + TN}{TP + TN + FP + FN}}$
+```{r}
+accuracyTest <- sum(diag(confusionMatrix)) / sum(confusionMatrix)
+round(accuracyTest, digits = 3)
+```
+Dokladnosc okresla bliskosc otrzymanych wynikow do wartosci rzeczywistej. Jest to jednak metryka, ktora powinno uzywac sie jedynie dla zrownowazonych danych tzn. takiej samej ilosci osob z posiadajacyh roczny przychod powyzej 50K i ponizej 50K. Jak pokazano w punkcie 2.6 w tych danych przewazaja osoby z przychodem nizszym lub rownym 50K rocznie.
+
+### 2.10 Obliczenie F1-score dla opracowanego modelu
+Wracajac do tabeli pomylek mozna takze zauwazyc, ze najwieksza liczba przypadkow jest sklasyfikowana jako prawdziwie negatywna. Aby lepiej okreslic poprawnosc stworzonego modelu wyznaczono takze metryki precision oraz recall. Precision okresla dokladnosc pozytywnej prognozy. Jest ona istotna w przypadkach, w ktorych wazne jest aby nie miec duzej ilosci FP  i zdefiniowana jest nastepujacym wzorem: 
+
+$precision = {\frac{TP}{TP+FP}}$
+
+```{r}
+tp =  confusionMatrix[2, 2]
+fp = confusionMatrix[1, 2]
+
+precision = tp/(tp+fp)
+round(precision, digits = 3)
+```
+Natomiast recall okresla stosunek pozytywnych wynikow do wynikow poprawnie wykrywanych przez algorytm i zdefiniowany jest wzorem:
+
+$recall = {\frac{TP}{TP+FN}}$
+```{r}
+fn = confusionMatrix[2,1]
+
+recall = tp/(tp+fn)
+round(recall, digits = 3)
+```
+Korzystajac z wyliczonych wyzej metryk, mozna wyznaczyc F1-score, ktory jest ostateczna miara dokladnosci tesu. F1-score oznacza sie nastepujacym wzorem:
+
+$F_{1 - score} = {2 \frac{precision*recall}{precision+recall}}$
+```{r}
+f1 <- 2 * ((precision * recall) / (precision + recall))
+round(f1, digits = 3)
+```
+F1-score moze wynosic od 0 do 1, gdzie 1 oznacza najlepszy mozliwy wynik, mowiacy o najlepiej dopasowanym modelu. Zawiera zarówno informacje na temat precision jak i recall. 
+
+### Podsumowanie
+Utworzono model do predykcji przychodu >50K rocznie, za pomoc funkcji glm. Dane zostaly wczesniej przefitrowane. Model zostal dopracowany za pomoca funkcji step oraz przetestowany na danych testowych. Wyznaczono metryki takie jak precision, recall oraz F1-score do oceny modelu. 
